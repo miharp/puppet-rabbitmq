@@ -349,6 +349,7 @@ describe 'rabbitmq' do
 
         release = 'https://github.com/rabbitmq/rabbitmqadmin-ng/releases/download'
         arch = os_facts['os']['architecture']
+        deb_arch = (arch == 'aarch64') ? 'arm64' : arch
 
         it { is_expected.to compile.with_all_deps }
         it { is_expected.to contain_class('rabbitmq::install::rabbitmqadmin_ng') }
@@ -357,7 +358,6 @@ describe 'rabbitmq' do
 
         case os_facts['os']['family']
         when 'Debian'
-          deb_arch = (arch == 'aarch64') ? 'arm64' : arch
           deb = "/var/lib/rabbitmq/rabbitmqadmin_2.35.0_#{deb_arch}.deb"
 
           it 'downloads the deb of the default version and installs that version' do
@@ -393,13 +393,40 @@ describe 'rabbitmq' do
         context 'with rabbitmqadmin_ng_version set', if: %w[Debian RedHat].include?(os_facts['os']['family']) do
           let(:params) { super().merge(rabbitmqadmin_ng_version: '2.34.0') }
 
-          it { is_expected.to contain_package('rabbitmqadmin').with_ensure('2.34.0').with_source(%r{2\.34\.0}) }
+          if os_facts['os']['family'] == 'Debian'
+            old_deb = "/var/lib/rabbitmq/rabbitmqadmin_2.34.0_#{deb_arch}.deb"
+
+            it 'downloads the deb and its checksum for that version and installs it' do
+              is_expected.to contain_archive__download(old_deb).with(
+                url: "#{release}/v2.34.0/rabbitmqadmin_2.34.0_#{deb_arch}.deb",
+                digest_url: "#{release}/v2.34.0/rabbitmqadmin_2.34.0_#{deb_arch}.deb.sha512",
+              )
+              is_expected.to contain_package('rabbitmqadmin').with(
+                ensure: '2.34.0',
+                source: old_deb,
+              )
+            end
+          else
+            it 'installs the rpm of that version from its release URL' do
+              is_expected.to contain_package('rabbitmqadmin').with(
+                ensure: '2.34.0',
+                source: "#{release}/v2.34.0/rabbitmqadmin-2.34.0-1.#{arch}.rpm",
+              )
+            end
+          end
         end
 
         context 'with service_manage set to false' do
           let(:params) { super().merge(service_manage: false) }
 
           it { is_expected.not_to contain_class('rabbitmq::install::rabbitmqadmin_ng') }
+        end
+
+        context 'with admin_enable set to false' do
+          let(:params) { super().merge(admin_enable: false) }
+
+          it { is_expected.not_to contain_class('rabbitmq::install::rabbitmqadmin_ng') }
+          it { is_expected.not_to contain_package('rabbitmqadmin') }
         end
       end
 
