@@ -342,6 +342,67 @@ describe 'rabbitmq' do
         end
       end
 
+      # The 4.x path. The version is set here, not taken from
+      # BEAKER_FACTER_rabbitmq_version, so these run in every unit job.
+      context 'with rabbitmq_version 4.3 and admin_enable set to true' do
+        let(:params) { { rabbitmq_version: '4.3', admin_enable: true, service_manage: true } }
+
+        release = 'https://github.com/rabbitmq/rabbitmqadmin-ng/releases/download'
+        arch = os_facts['os']['architecture']
+
+        it { is_expected.to compile.with_all_deps }
+        it { is_expected.to contain_class('rabbitmq::install::rabbitmqadmin_ng') }
+        it { is_expected.not_to contain_class('rabbitmq::install::rabbitmqadmin') }
+        it { is_expected.not_to contain_file('/usr/local/bin/rabbitmqadmin') }
+
+        case os_facts['os']['family']
+        when 'Debian'
+          deb_arch = (arch == 'aarch64') ? 'arm64' : arch
+          deb = "/var/lib/rabbitmq/rabbitmqadmin_2.35.0_#{deb_arch}.deb"
+
+          it 'downloads the deb of the default version and installs that version' do
+            is_expected.to contain_archive__download(deb).with(
+              url: "#{release}/v2.35.0/rabbitmqadmin_2.35.0_#{deb_arch}.deb",
+              digest_type: 'sha512',
+              digest_url: "#{release}/v2.35.0/rabbitmqadmin_2.35.0_#{deb_arch}.deb.sha512",
+            )
+            is_expected.to contain_package('rabbitmqadmin').with(
+              ensure: '2.35.0',
+              source: deb,
+            ).that_requires("Archive::Download[#{deb}]")
+          end
+
+          context 'on aarch64' do
+            let(:facts) { os_facts.merge('os' => os_facts['os'].merge('architecture' => 'aarch64')) }
+
+            it 'uses the arm64 asset name' do
+              is_expected.to contain_archive__download('/var/lib/rabbitmq/rabbitmqadmin_2.35.0_arm64.deb')
+                .with_url("#{release}/v2.35.0/rabbitmqadmin_2.35.0_arm64.deb")
+              is_expected.to contain_package('rabbitmqadmin').with_source('/var/lib/rabbitmq/rabbitmqadmin_2.35.0_arm64.deb')
+            end
+          end
+        when 'RedHat'
+          it 'installs the rpm of the default version from the release URL' do
+            is_expected.to contain_package('rabbitmqadmin').with(
+              ensure: '2.35.0',
+              source: "#{release}/v2.35.0/rabbitmqadmin-2.35.0-1.#{arch}.rpm",
+            )
+          end
+        end
+
+        context 'with rabbitmqadmin_ng_version set', if: %w[Debian RedHat].include?(os_facts['os']['family']) do
+          let(:params) { super().merge(rabbitmqadmin_ng_version: '2.34.0') }
+
+          it { is_expected.to contain_package('rabbitmqadmin').with_ensure('2.34.0').with_source(%r{2\.34\.0}) }
+        end
+
+        context 'with service_manage set to false' do
+          let(:params) { super().merge(service_manage: false) }
+
+          it { is_expected.not_to contain_class('rabbitmq::install::rabbitmqadmin_ng') }
+        end
+      end
+
       describe 'manages configuration directory correctly' do
         it {
           is_expected.to contain_file('/etc/rabbitmq').with(
